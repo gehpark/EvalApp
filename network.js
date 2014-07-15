@@ -1,66 +1,38 @@
+// =========================== SOCKET CONNECTIOM =========================== //
 
-// ========== SOCKET CONNECTION ========== //
 var behavior = require("./behavior");
 var io = require('socket.io')(behavior.http);
-//var pr = require('Peer');
-//var holla = require('holla');
+var serverjs = require("./server");
+var server = new serverjs.Server();
 
-// ========== ACTION =========== //
+// ================================ ACTION ================================ //
 
-// log when the connection is made
+// when the user clicks the start/stop button.. 
 io.on('connection', function(socket){
+  // log when the connection is made
   console.log('initialization...');
   behavior.stream.write('initialization...' + "\r\n");
-});
-
-// when the user clicks the start button.. 
-io.on('connection', function(socket){
+  // on start button press
   socket.on('start', function(){
     behavior.action();
+    behavior.statPrintWrapper();
   });
-});
-
-// when the user clicks the start button.. 
-io.on('connection', function(socket){
+  // on stop button press
   socket.on('stop', function(){
     behavior.stopAction();
   });
-});
-
-// the browser is turned off
-io.on('connection', function(socket){
+  // on browser exit
   socket.on('disconnect', function(){
     console.log('Disconnected');
     behavior.stream.write('Disconnected' + "\r\n");
   });
 });
 
-  // create a peer element to represent the client for WebRTC
-//var peer = new pr.Peer(5, {key: 'myapikey'}); 
-// connect all to each other? 
-//var conn = (clients[0].peer).connect(clients[(0+1)%(clients.length)]);
-
-
-// when a request is made
-io.on('request', function() {});
-
-// when a client leaves
-io.on('leave', function() {});
-
-// when a client leaves
-io.on('leave', function() {});
-
-// when a client leaves
-io.on('leave', function() {});
-
-// ====== WEBRTC ====== //
-
-// conn.on('open', function() {
-//   // do something;
-// });
-
-// peer.on('incoming', function() {
-//   conn.on('data', function(data) {
-//     // do something
-//   });
-// });
+// when the server receives a request..
+behavior.http.on('request', function(req, res) {
+  // print out the type of the request to the console
+  console.log("request made! " + req.method);
+  // increment the request count
+  behavior.count += 1;
+  behavior.currCount += 1;
+});
