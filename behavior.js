@@ -51,7 +51,7 @@ for (var c in clients) {
 // create the node prototype. this is the structure that will represnet
 // each node in the ring structure for the chord algorithm.
 function node() {
-  // the id of the client that is the node
+  // the client that is the node
   this.client = null;
   // node id that is given to the node itself
   this.nodeID = null;
@@ -65,6 +65,37 @@ function node() {
   this.recipients = [];
   // part of the chord algorithm
   this.fingerTable = [];
+  // each node should remember a few (m/2, lets say for now) 
+  // successors and predecessors in case the immediate relations fail.
+  this.successorsList = [];
+  this.predeccesorsList = [];
+}
+
+// this function tests whether a <= b <= c. 
+// used to implement the finger table search method
+var isBetween = function(a, b, c, maxID) {
+  // if the first bound is smaller than the second 
+  if(a < c) {
+    // compare and return appropriate boolean
+    if (a <= b && b >= c) {
+      return true;
+    }
+    else {
+      return false;
+    }
+  }
+  // if the first bound is larger than the second, it means we are
+  // crossing over the maxID and starting over on the ring.
+  // so we can add the maxID to compare. this should only happen
+  // at maximum once per finger table
+  else {
+    if (a <= b && b >= c+maxID) {
+      return true;
+    }
+    else {
+      return false;
+    }
+  }
 }
 
 // this prototpe defines the structure of the ring that we will need to
@@ -81,12 +112,11 @@ function ring(m) {
   // this function finds the first empty slot in which we can place a
   // new node and places it there, stabilizing by updating the
   // successors and predecessors.
-  this.placeInSlot = function(newNode) {
+  this.placeInSlotOld = function(newNode) {
     // keep track of whether the node has been placed or not yet
     var placed = false;
     // if there are no nodes in the ring add this as both head and tail
     if (this.head == undefined && this.tail == undefined) {
-      console.log("heres the first one!");
       this.head = newNode;
       this.tail = newNode;
       newNode.cw = newNode;
@@ -105,7 +135,6 @@ function ring(m) {
       }
       // if there is only one element in the ring..
       else if (this.head === this.tail) {
-        console.log("this should be the second!");
         this.tail = newNode;
         newNode.cw = this.head;
         newNode.ccw = this.head;
@@ -113,7 +142,6 @@ function ring(m) {
       }
       // if not, we want to traverse through the rest of the ring
       else {
-        console.log("we have more than 2!");
         // start with the head
         var current = this.head;
         // until we have reached the end of the nodes
@@ -146,9 +174,92 @@ function ring(m) {
     return placed;
   }
 
-  // 
-  this.assignKeys = function() {
+  this.loop = function(f) {
+    var current = this.head; 
+    // do this for all nodes
+    do {
+      this.f(current);
+      current = current.cw;
+    // stop the loop when we have reached our last node
+    } while (current != this.tail)
+  }
 
+  // 
+  this.assignKeysToNodes = function() {
+
+  }
+
+  this.assignKeyIDs = function() {
+
+  }
+
+  // this function taks in a node and builds the successor and 
+  // predecessor lists of that node
+  this.buildSuccessorsPredecessorsList = function(nd) {
+    // variables to keep track as we move away from the input node
+    var nextCW = nd;
+    var nextCCW = nd;
+    // make the array size m/2
+    for(var i = 0; i < m/2; i++) {
+      // add successor and increment
+      nd.successors.push(nextCW.cw);
+      nextCW = next.cw;
+      // and predecessor and increment
+      nd.predeccessors.push(nextCCW.ccw);
+      nextCCW = next.ccw;
+    }
+  }
+
+  // this function returns the first node encountered after a given node ID
+  this.getCW = function(nodeID) {
+    var current = nodeID;
+    // try getting the node at the given ID
+    var successor = getNode(nodeID);
+    // if we couldnt get one, we want to find the node closest to it
+    while (successor != undefined) {
+      // so we iterate until we get a node
+      current += 1;
+      successor = getNode(current); 
+    }
+    return successor;
+  }
+
+  // this function builds the finger tables for all the nodes in the ring
+  this.buildFingerTable = function(nd) {
+      // and each finger table should have m entries
+      for (var i = 0; i < m; i++) {
+        // the finger table id may be greater than the maxID; so use mod
+        var ndID = (nd.nodeID + 2^i)%2^m;
+        // add the tuple of the id and the following node to the fingertable
+        nd.fingerTable.push([ndID, this.getCW(ndID)]);
+      }
+  }
+
+  // this function finds what element of the finger table should be referenced
+  this.findFingerTable = function(inputID, nd) {
+  for (var i = 0; i < m-1; i++) {
+      if (isBetween(nd.fingerTable[i][0], inputID, nd.fingerTable[i+1][0])) {
+        return nd.fingerTable[i];
+      }
+      else {
+        // TODO
+        return null;
+      }
+    }
+  }
+
+  // this function places a new node where it belongs
+  // by the Chord algorithm method, the node must know at least one other node
+  // that already is on the ring.
+  this.put = function(newNode, nd) {
+    // find the successor of the new node that we want to add
+    var place = findFingerTable(newNode.nodeID, nd);
+    // update the successors and predecessors of the new node
+    newNode.cw = place;
+    newNode.ccw = place.ccw;
+    // and same for the successors and predecessors themselves
+    place.ccw = newNode;
+    newNode.cw = newNode;
   }
 
   // this function returns the node that corresponds to the input node id
@@ -178,11 +289,46 @@ function ring(m) {
 
   // update the predecessors and successorts for the ring structure
   // when a node joins
-  this.join = function (client) {
-    // add the input client instance to the array of all our clients
-    clients.push(client);
+  this.join = function (object,nd) {
+    if (object.type == client) {
+      // add the input client instance to the array of all our clients
+      clients.push(client);
+    }
     // create a node element and add to the ring structure
-    this.placeInSlot(new node(client));
+    this.put(new node(object), nd);
+  }
+
+  // this function stabilizes the whole ring in case some nodes failed
+  this.stabilize = function() {
+    // keep track of which node we are observing
+    var current = this.head;
+    // go through the whole ring until we get to the tail
+    while(current != this.tail) {
+      // if the successor failed
+      if (!current.cw.client) {
+        for(var i = 1; i < m/2; i++) {
+          var newCW = current.successors[i];
+          i++;
+          if (newCW) {
+            // replace the successor with the new working one
+            current.cw = newCW;
+            break;
+          }
+        }
+      }
+      // if the predeccessor failed
+      if (!current.ccw.client) {
+        for(var i = 1; i < m/2; i++) {
+          var newCCW = current.predeccessors[i];
+          i++;
+          if (newCCW) {
+            // replace the successor with the new working one
+            current.ccw = newCCW;
+            break;
+          }
+        }
+      }
+    }
   }
 
 }
@@ -202,13 +348,19 @@ exports.app.use(express.static(__dirname, '/public'));
 
 
 // ========================= NETWORK WEBRTC SET UP ========================= //
-console.log('making ring..');
-var cRing = new ring(4);
-for (c in clients) {
-  var g = cRing.placeInSlot(new node(clients[c]));
-  console.log(g);
-}
+// for now we just build the ring.. in order. 
+// i believe im supposed to use SHA-1?
+// i need to figure out how that exactly works.
 
+// console.log('making ring..');
+// var cRing = new ring(4);
+// for (c in clients) {
+//   var g = cRing.placeInSlotOld(new node(clients[c]));
+//   console.log(g);
+// }
+// cRing.loop(cRing.buildFingerTable);
+// cRing.loop(cRing.buildSuccessorsPredecessorsList);
+  
 // ============================= TIMER SET UP ============================= //
 
 // set the duration for which we want the simulation to run
@@ -218,9 +370,20 @@ var maxTime = 5000;
 var start = new Date();
 var startmil = start.getTime();
 
+// set the timer interval
+var timerInterval = 1000;
+
 // default this variable to false
 var isTimerDone = false;
 
+// these variables are for statPrint; an alternative to statFunc
+// issues with reporting the request count with using the 'measured' module
+// set count to start at -3 due to initialization requests that are made
+exports.count = -3;
+exports.currCount = 0;
+var mean = 0;
+var current = 0;
+var oneMin = 0;
 
 // ============================= OUTPUT SET UP ============================= //
 
@@ -265,6 +428,40 @@ var timeData = [];
 
 // ============================ REQUEST ACTION ============================ //
 
+// this is for the gather and send method without webRTC
+// set 
+var setGatherKey = function() {
+  for (var i = 0; i < clients.requests.length; i++) {
+    var randClient = clients[Math.floor(Math.random() * clients.length)];
+    randClient.gatherKey = clients.requests[i];
+    clients.requests[i][1] = randClient.id;
+  }
+}
+
+// var gather = function(c, randRequest, timeElapsed) {
+//   switch (randRequest): {
+//     case "HEAD":
+//       console.log(clients[c].id + "'s request sent to: " + clients[randRequest[1]]);
+//       clients[randRequest[1]].reqs.push("From: " + clients.[c].id + " at time: " + timeElapsed);
+//       break;
+//     case "PUT":
+//       break;
+//     case "DELETE":
+//       break;
+//     case "OPTIONS":
+//       break;
+//     case "CONNECT":
+//       break;
+//     case "PORT":
+//       break;
+//     case "GET":
+//       break;
+//     default:
+//   }
+// }
+
+
+
 // this function starts the sending of the requests from the clients
 exports.action = function() {
   // since it is an exported function, we want to include request here.. 
@@ -280,21 +477,29 @@ exports.action = function() {
 
     // each client will make a request
     for (var c in clients) {
-      clientjs.makeReq(exports.port);
       // choose what type of request to (randomly) "make"
       var randRequest = clientjs.randReq();
       // print to the console
-      console.log(randRequest + " requested by: " + clients[c].id + ", TIME: " + timeElapsed);
+      console.log(randRequest[0] + " requested by: " + clients[c].id + ", TIME: " + timeElapsed);
+      // create a variable to hold the options for this request
+      var options = {
+        uri: "http://localhost:" + exports.port + "/",
+        method: "GET",
+        body: "words with no meaning"
+      }
+      // set the method of the request to be the request that we have chosen
+      options.method = randRequest[0];
+      clientjs.makeReq(options);
       // save to each client's personal request log
-      clients[c].reqs.push(randRequest);
+      clients[c].reqs.push(randRequest[0]);
     };
-  }, 1000);
+  }, timerInterval);
 
   // at each timer interval print out server stats
   exports.statFunc = setInterval(function() {
     // log the current time
-    var timeElapsed = (new Date().getTime() - start).toString();
-    exports.stream.write("Time Elapsed at stat check: " + timeElapsed + "\r\n");
+    var timeElapsedStat = (new Date().getTime() - start).toString();
+    exports.stream.write("Time Elapsed at stat check: " + timeElapsedStat + "\r\n");
     
     var dataJSON = stats.toJSON();
     var test = dataJSON.mean;
@@ -304,17 +509,54 @@ exports.action = function() {
     var entry = new dataEntry(splitdata);
     // add on the type of count that we want to our data array
     // right now we are keeping track of the mean # of requests
-    timeData.push(new timeDataPair(timeElapsed, entry.mean));
+    timeData.push(new timeDataPair(timeElapsedStat, entry.mean));
     // save the data onto the output file
     for (var i = 0; i < splitdata.length; i++) {
         exports.stream.write(splitdata[i] + "\r\n");
       }
-  }, 1000);
+  }, timerInterval);
+}
+
+exports.statPrintWrapper = function() {
+  // this function is an alternative to statfunc
+  exports.statPrint = setInterval(function() {
+    // get the current time for the record
+    var timeElapsedStat = (new Date().getTime() - start).toString();
+    exports.stream.write("Time Elapsed at stat check: " + timeElapsedStat + "\r\n");
+    
+    // calculate all the statistics
+    mean = exports.count / timeElapsedStat;
+    current = exports.currCount / timerInterval;
+    oneMin = exports.count / 60000;
+
+    // print to both the console and the output file
+    console.log("Server Statistics: " + "time : " + timeElapsedStat);
+    exports.stream.write("Server Statistics: " + "time : " + timeElapsedStat + "\n");
+
+    console.log("   Total count: " + exports.count);
+    exports.stream.write("    Total count: " + exports.count + "\n");
+
+    console.log("   Mean: " + mean);
+    exports.stream.write("    Mean: " + mean + "\n");
+
+    console.log("   Current Rate: " + current);
+    exports.stream.write("    Current Rate: " + current + "\n");
+
+    console.log("   1 Minute Rate: " + oneMin);
+    exports.stream.write("    1 Minute Rate: " + oneMin + "\n");
+
+    // reset the current count
+    exports.currCount = 0;
+  }, timerInterval);
 }
 
 // stop the communication
 exports.stopAction = function() {
   clearInterval(exports.reqFunc);
   clearInterval(exports.statFunc);
+  clearInterval(exports.statPrint);
 }
 
+exports.resetAction = function() {
+  // TODO
+}
