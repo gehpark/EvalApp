@@ -1,4 +1,4 @@
-// ========== CLIENTS =========== //
+// ================================ CLIENTS ================================ //
 
 // use the request package to send fake requests
 var request = require("request");
@@ -9,14 +9,20 @@ exports.Client = function(id) {
   this.id = id;
   // create an array to hold all its requests
   this.reqs = [];
+  this.type = "client";
+  this.gatherKey = null;
+  this.keyCounter = 0;
 };
 
 // this is the array of requests that the clients can make
-exports.requests = ["HEAD", "PUT", "DELETE", "OPTIONS", "CONNECT", "PORT", "GET"];
+exports.requests = [["HEAD",0], ["PUT",0], ["DELETE",0], ["OPTIONS",0], ["GET",0]];
+// comment these out because they, as fake requests, cause the socket to 
+//  hang up.
+//["PORT",0], ["CONNECT",0], 
 
 // makes the request
-exports.makeReq = function (port) {
-	request("http://localhost:" + port + "/", function(error, response, body) {
+exports.makeReq = function (options) {
+	request(options, function(error, res, body) {
       if (error !== null) {
         console.log(error);
       }
@@ -27,8 +33,3 @@ exports.makeReq = function (port) {
 exports.randReq = function () {
 	return exports.requests[Math.floor(Math.random() * exports.requests.length)];
 };
-
-
-exports.connectRTC = function() {
-
-}
