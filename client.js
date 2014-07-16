@@ -10,15 +10,32 @@ exports.Client = function(id) {
   // create an array to hold all its requests
   this.reqs = [];
   this.type = "client";
-  this.gatherKey = null;
-  this.keyCounter = 0;
+  this.gatherKey = [];
+  this.reqCounter = 0;
 };
 
+// create a data prototype
+exports.Data = function(reqType) {
+  this.type = "data";
+  this.body = null;
+  this.reqType = reqType;
+  // client that this request should be forwarded to
+  this.representative = null;
+}
+
 // this is the array of requests that the clients can make
-exports.requests = [["HEAD",0], ["PUT",0], ["DELETE",0], ["OPTIONS",0], ["GET",0]];
+var requestNames = ["HEAD", "PUT", "DELETE", "OPTIONS", "GET"];
 // comment these out because they, as fake requests, cause the socket to 
 //  hang up.
 //["PORT",0], ["CONNECT",0], 
+
+// create a list of data objects to hold the requests
+exports.requests = [];
+
+// create new data objects for each request type and add to array
+for (var r in requestNames) {
+  exports.requests.push(new exports.Data(requestNames[r]));
+}
 
 // makes the request
 exports.makeReq = function (options) {
@@ -33,3 +50,10 @@ exports.makeReq = function (options) {
 exports.randReq = function () {
 	return exports.requests[Math.floor(Math.random() * exports.requests.length)];
 };
+
+// this function resets all the fields of a client
+exports.resetClients = function() {
+  this.reqs = [];
+  this.reqCounter = 0;
+  this.gatherKey = [];
+}
