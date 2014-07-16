@@ -32,6 +32,9 @@ var numClients = 10;
 // the strcutre of the ring that we will use for the DHT chord algorithm
 var clients = [];
 
+// keep a list of the keys that we have
+var keys = [];
+
 // create instances of Client for each client
 for (var i = 0; i < numClients; i++) {
   // and add to the array
@@ -69,6 +72,19 @@ function node() {
   // successors and predecessors in case the immediate relations fail.
   this.successorsList = [];
   this.predeccesorsList = [];
+}
+
+function key(requestType) {
+  // the data that is this node
+  this.data = null;
+  // the id that is given to this key. same space as nodeIDs
+  this.ID = null;
+}
+
+// create a new key for each data object
+// and add it to the array of keys
+for (var i in clientjs.requests) {
+  keys.push(new key(clientjs.requests[i]));
 }
 
 // this function tests whether a <= b <= c. 
@@ -184,15 +200,33 @@ function ring(m) {
     } while (current != this.tail)
   }
 
-  // 
+  // assign IDS to data(keys) and clients(nodes)
+  this.assignIDs = function(keysList) {
+    // TODO SHA-1
+    // we want to keep track of the smallest id to 
+    // set it as the head node
+    var minNodeID = 2^m - 1;
+    for (var i = 0; i < 2^m; i++) {
+      
+    }
+    return minNodeID;
+  }
+
+ // this function 
   this.assignKeysToNodes = function() {
-
+    for (var k in keys) {
+      keys[k].responsibleNode = this.getCW(keys[k].ID);
+    }
   }
 
-  this.assignKeyIDs = function() {
-
+  // 
+  this.setUp = function() {
+    var min = this.assignIDs(keys);
+    // DO STUFF WITH THE NODES
+    assignKeysToNodes();
   }
 
+ 
   // this function taks in a node and builds the successor and 
   // predecessor lists of that node
   this.buildSuccessorsPredecessorsList = function(nd) {
@@ -210,11 +244,11 @@ function ring(m) {
     }
   }
 
-  // this function returns the first node encountered after a given node ID
-  this.getCW = function(nodeID) {
-    var current = nodeID;
+  // this function returns the first node encountered after a given ID
+  this.getCW = function(ID) {
+    var current = ID;
     // try getting the node at the given ID
-    var successor = getNode(nodeID);
+    var successor = getNode(ID);
     // if we couldnt get one, we want to find the node closest to it
     while (successor != undefined) {
       // so we iterate until we get a node
@@ -242,8 +276,9 @@ function ring(m) {
         return nd.fingerTable[i];
       }
       else {
-        // TODO
-        return null;
+        // forward this problem to the successor and see if that one can 
+        // locate where the input node should go
+        this.findFingerTable(inputID, nd.cw);
       }
     }
   }
@@ -348,19 +383,15 @@ exports.app.use(express.static(__dirname, '/public'));
 
 
 // ========================= NETWORK WEBRTC SET UP ========================= //
-// for now we just build the ring.. in order. 
-// i believe im supposed to use SHA-1?
-// i need to figure out how that exactly works.
+// create and set up the ring
+var cRing = new ring(4);
+cRing.assignIDs(keys);
+cRing.assignKeysToNodes();
+cRing.loop(cRing.buildFingerTable);
+cRing.loop(cRing.buildSuccessorsPredecessorsList);
 
-// console.log('making ring..');
-// var cRing = new ring(4);
-// for (c in clients) {
-//   var g = cRing.placeInSlotOld(new node(clients[c]));
-//   console.log(g);
-// }
-// cRing.loop(cRing.buildFingerTable);
-// cRing.loop(cRing.buildSuccessorsPredecessorsList);
-  
+// stabilize the ring every x seconds?
+// var function = setInterval(cRing.stabilize(), 10000); 
 // ============================= TIMER SET UP ============================= //
 
 // set the duration for which we want the simulation to run
@@ -368,7 +399,6 @@ var maxTime = 5000;
 
 // save the start time
 var start = new Date();
-var startmil = start.getTime();
 
 // set the timer interval
 var timerInterval = 1000;
@@ -429,38 +459,29 @@ var timeData = [];
 // ============================ REQUEST ACTION ============================ //
 
 // this is for the gather and send method without webRTC
-// set 
+// assign a key to some client
 var setGatherKey = function() {
-  for (var i = 0; i < clients.requests.length; i++) {
+  // we want to make sure each request type is assigned to a client
+  for (var i in clientjs.requests) {
+    // choose a random client
+    // use math.random for now -> replace with SHA-1
     var randClient = clients[Math.floor(Math.random() * clients.length)];
-    randClient.gatherKey = clients.requests[i];
-    clients.requests[i][1] = randClient.id;
+    // add the request to the array of keys that this client is responsible for
+    randClient.gatherKey.push(clientjs.requests[i]);
+    // now connect the request to client from its side, too
+    clientjs.requests[i].representative = randClient;
   }
 }
 
-// var gather = function(c, randRequest, timeElapsed) {
-//   switch (randRequest): {
-//     case "HEAD":
-//       console.log(clients[c].id + "'s request sent to: " + clients[randRequest[1]]);
-//       clients[randRequest[1]].reqs.push("From: " + clients.[c].id + " at time: " + timeElapsed);
-//       break;
-//     case "PUT":
-//       break;
-//     case "DELETE":
-//       break;
-//     case "OPTIONS":
-//       break;
-//     case "CONNECT":
-//       break;
-//     case "PORT":
-//       break;
-//     case "GET":
-//       break;
-//     default:
-//   }
-// }
-
-
+// we want to gather elements together
+var gather = function(c, randRequest, timeElapsed) {
+  // log that the request was forwarded to another client
+  console.log(clients[c].id + "'s request sent to: " + randRequest.representative.id);
+  // add it to the list of requests that the client just received
+  randRequest.representative.reqs.push("From: " + clients[c].id + " at time: " + timeElapsed);
+  // increment the request counter
+  randRequest.representative.reqCounter++;
+}
 
 // this function starts the sending of the requests from the clients
 exports.action = function() {
@@ -468,7 +489,9 @@ exports.action = function() {
   var request = require("request");
   //// use below for GUI stuff to display console
   // var doc = document.open()
-  
+  setGatherKey();
+  // set the start time here again to mark when the button is actually pressed
+  start = new Date()
   // at each timer interval make requests to the server
   exports.reqFunc = setInterval(function () {
     // log the current time
@@ -480,19 +503,28 @@ exports.action = function() {
       // choose what type of request to (randomly) "make"
       var randRequest = clientjs.randReq();
       // print to the console
-      console.log(randRequest[0] + " requested by: " + clients[c].id + ", TIME: " + timeElapsed);
-      // create a variable to hold the options for this request
-      var options = {
-        uri: "http://localhost:" + exports.port + "/",
-        method: "GET",
-        body: "words with no meaning"
-      }
-      // set the method of the request to be the request that we have chosen
-      options.method = randRequest[0];
-      clientjs.makeReq(options);
+      console.log(randRequest.reqType + " requested by: " + clients[c].id + ", TIME: " + timeElapsed);
+
+      gather(c, randRequest, timeElapsed);
       // save to each client's personal request log
-      clients[c].reqs.push(randRequest[0]);
+      clients[c].reqs.push(randRequest.reqType);
     };
+  }, timerInterval);
+
+  // at each timer interval, send requests to the server
+  exports.sendReqFunc = setInterval(function () {
+    for (var i in clientjs.requests) {
+      if (clientjs.requests[i].representative.reqCounter != 0) {
+        // create a variable to hold the options for this request
+        var options = {
+          uri: "http://localhost:" + exports.port + "/",
+          // default to GET
+          method: clientjs.requests[i].reqType,
+          body: "words with no meaning"
+        }
+        clientjs.makeReq(options);
+      }
+    }
   }, timerInterval);
 
   // at each timer interval print out server stats
@@ -517,6 +549,8 @@ exports.action = function() {
   }, timerInterval);
 }
 
+// wrapper for the function that prints out statistics for the server
+// load measuring tool (alternate version)
 exports.statPrintWrapper = function() {
   // this function is an alternative to statfunc
   exports.statPrint = setInterval(function() {
@@ -530,18 +564,14 @@ exports.statPrintWrapper = function() {
     oneMin = exports.count / 60000;
 
     // print to both the console and the output file
-    console.log("Server Statistics: " + "time : " + timeElapsedStat);
-    exports.stream.write("Server Statistics: " + "time : " + timeElapsedStat + "\n");
-
+    console.log("Server Statistics: time : " + timeElapsedStat);
+    exports.stream.write("Server Statistics: time : " + timeElapsedStat + "\n");
     console.log("   Total count: " + exports.count);
     exports.stream.write("    Total count: " + exports.count + "\n");
-
     console.log("   Mean: " + mean);
     exports.stream.write("    Mean: " + mean + "\n");
-
     console.log("   Current Rate: " + current);
     exports.stream.write("    Current Rate: " + current + "\n");
-
     console.log("   1 Minute Rate: " + oneMin);
     exports.stream.write("    1 Minute Rate: " + oneMin + "\n");
 
@@ -553,10 +583,20 @@ exports.statPrintWrapper = function() {
 // stop the communication
 exports.stopAction = function() {
   clearInterval(exports.reqFunc);
+  clearInterval(exports.sendReqFunc);
   clearInterval(exports.statFunc);
   clearInterval(exports.statPrint);
 }
 
+// reset the statistics for a rerun
 exports.resetAction = function() {
-  // TODO
+  // reset the clients' fields
+  exports.stream.close();
+  for (var c in clients) {
+    clientjs.resetClients();
+  }
+  // reset counters and times
+  exports.count = 0;
+  exports.currCount = 0;
+  start = new Date();
 }
