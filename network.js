@@ -21,6 +21,14 @@ io.on('connection', function(socket){
   socket.on('stop', function(){
     behavior.stopAction();
   });
+  // on reset button press
+  socket.on('reset', function(){
+    behavior.resetAction();
+  });
+    // on reset button press
+  socket.on('DHT', function(){
+    behavior.applyDHT = true;
+  });
   // on browser exit
   socket.on('disconnect', function(){
     console.log('Disconnected');
