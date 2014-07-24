@@ -23,6 +23,14 @@ exports.Data = function(reqType) {
   this.representative = null;
 }
 
+// create a prototype for a log info to store
+// type of request and the time at which it was received
+exports.logInfo = function(from, time) {
+  this.from = from;
+  this.time = time;
+  this.data = null;
+}
+
 // this is the array of requests that the clients can make
 var requestNames = ["HEAD", "PUT", "DELETE", "OPTIONS", "GET"];
 // comment these out because they, as fake requests, cause the socket to 
@@ -39,7 +47,7 @@ for (var r in requestNames) {
 
 // makes the request
 exports.makeReq = function (options) {
-	request(options, function(error, res, body) {
+	var r = request(options, function(error, res, body) {
       if (error !== null) {
         console.log(error);
       }
