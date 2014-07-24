@@ -13,46 +13,44 @@
     <script>
       var socket = io();
     </script>
-    <script src="http://cdn.peerjs.com/0.3/peer.js"></script>
-    <script src="network.js"></script>
+   <!--  // <script src="http://cdn.peerjs.com/0.3/peer.js"></script> -->
+    <script src="behavior.js"></script>
+    <script src="http://crypto-js.googlecode.com/svn/tags/3.1.2/build/rollups/sha256.js"></script>
+<script src="http://crypto-js.googlecode.com/svn/tags/3.1.2/build/components/enc-base64-min.js"></script>
 
+
+<!-- Enable for SHA-1 (https://code.google.com/p/crypto-js/#SHA-1)
+    <script src="http://crypto-js.googlecode.com/svn/tags/3.1.2/build/rollups/sha1.js"></script>
     <script>
-  // This is a very simple code example. See chat.html for a more involved
-  // example.
+        var hash = CryptoJS.SHA1("Message");
+    </script>-->
 
-  $(document).ready(function() {
+    <!-- // <script> -->
 
+  <!-- $(document).ready(function() {
+
+    // for each client that we have..
     for (client c in behavior.clients) { 
-      // create a Peer 
+    // create a Peer 
     behavior.clients[c].peer = 
-      new Peer({
-        key: 'x7fwx2kavpy6tj4i',
-        //Set highest debug level (log everything!).
-        debug: 3,
-        // Set a logging function:
-        logFunction: function() {
-          var copy = Array.prototype.slice.call(arguments).join(' ');
-          $('.log').append(copy + '<br>');
-        }
+      new Peer(c, {
+        // personal peerjs cloud key
+        key: 'ltov6bchtibb7qfr',
+        port: behavior.port
       });
+    // this will keep track of which peers are connected to this socket
     behavior.clients[c].connectedPeers = {};
 
     // Show this peer's ID.
-    peer.on('open', function(id){
-      $('#pid').text(id);
+    behavior.clients[c].peer.on('open', function(id){
+      console.log('My peer ID is: ' + id);
     });
 
     // Await connections from others
-    peer.on('connection', connect);
+    behavior.clients[c].peer.on('connection', connect);
     }
 
-    // not sure if it should all go in the for loop...
-    // stopped at line 39 of: 
     // https://github.com/peers/peerjs/blob/master/examples/chat.html
-    // stop line here::: 
-
-    // no idea what the hell is going on over here. 
-    // how will i get this to connect with the other stuffffff i doo not knowest. 
     
     // Handle a connection object.
     function connect(c) {
@@ -87,27 +85,98 @@
               }
               delete connectedPeers[c.peer];
             });
-      } else if (c.label === 'file') {
-        c.on('data', function(data) {
-          // If we're getting a file, create a URL for it.
-          if (data.constructor === ArrayBuffer) {
-            var dataView = new Uint8Array(data);
-            var dataBlob = new Blob([dataView]);
-            var url = window.URL.createObjectURL(dataBlob);
-            $('#' + c.peer).find('.messages').append('<div><span class="file">' +
-                c.peer + ' has sent you a <a target="_blank" href="' + url + '">file</a>.</span></div>');
-          }
-        });
-      }
+      } 
       connectedPeers[c.peer] = 1;
     }
 
 
   });
 
+  function doNothing(e){
+    e.preventDefault();
+    e.stopPropagation();
+  }
+
+  // Connect to a peer
+  $('#connect').click(function() {
+    var requestedPeer = $('#rid').val();
+    if (!connectedPeers[requestedPeer]) {
+      // Create 2 connections, one labelled chat and another labelled file.
+      var c = peer.connect(requestedPeer, {
+        label: 'chat',
+        serialization: 'none',
+        metadata: {message: 'hi i want to chat with you!'}
+      });
+      c.on('open', function() {
+        connect(c);
+      });
+      c.on('error', function(err) { alert(err); });
+      var f = peer.connect(requestedPeer, { label: 'file', reliable: true });
+      f.on('open', function() {
+        connect(f);
+      });
+      f.on('error', function(err) { alert(err); });
+    }
+    connectedPeers[requestedPeer] = 1;
+  });
+
+  // Close a connection.
+  $('#close').click(function() {
+    eachActiveConnection(function(c) {
+      c.close();
+    });
+  });
+
+  // Send a chat message to all active connections.
+  $('#send').submit(function(e) {
+    e.preventDefault();
+    // For each active connection, send the message.
+    var msg = $('#text').val();
+    eachActiveConnection(function(c, $c) {
+      if (c.label === 'chat') {
+        c.send(msg);
+        $c.find('.messages').append('<div><span class="you">You: </span>' + msg
+          + '</div>');
+      }
+    });
+    $('#text').val('');
+    $('#text').focus();
+  });
+
+  // Goes through each active peer and calls FN on its connections.
+  function eachActiveConnection(fn) {
+    var actives = $('.active');
+    var checkedIds = {};
+    actives.each(function() {
+      var peerId = $(this).attr('id');
+
+      if (!checkedIds[peerId]) {
+        var conns = peer.connections[peerId];
+        for (var i = 0, ii = conns.length; i < ii; i += 1) {
+          var conn = conns[i];
+          fn(conn, $(this));
+        }
+      }
+
+      checkedIds[peerId] = 1;
+    });
+  }
+
+  // Show browser version
+  $('#browsers').text(navigator.userAgent);
+});
+
+// Make sure things clean up properly.
+
+window.onunload = window.onbeforeunload = function(e) {
+  if (!!peer && !peer.destroyed) {
+    peer.destroy();
+  }
+};
+
 
 </script>
-
+ -->
   </head>
 
   <body>
@@ -125,14 +194,34 @@
       </div>
     </div>
 
+
+
     <div class="jumbotron">
       <div class="container">
         <h1>Interactive Web App</h1>
         <p>Run simulations to test the effectiveness of DHTs</p>
         <button onclick=socket.emit('start')>Click to start running! </button>
         <button onclick=socket.emit('stop')>Stop </button>
+        <button onclick=socket.emit('reset')> Reset </button>
+        <button onclick=socket.emit('DHT')> Apply DHT </button>
       </div>
     </div> 
-    
+
+<!-- <button onclick="myFunction()">Try it</button> -->
+
+//     <script>
+     var behavior = require("./behavior");
+     var hash = CryptoJS.SHA256("Message");
+     var hex = hash.toString(CryptoJS.enc.Hex); // 2f77668a9dfbf8d5848b9eeb4a7145ca94c6ed9236e4a773f6dcafa5132b2f91
+
+  int value = Integer.parseInt(hex, 16);  
+
+
+//  BigInteger value = new BigInteger(hex, 16);
+
+
+
+//     hashFunction(behavior.cRing,)
+// </script>
   </body>
 </html>
