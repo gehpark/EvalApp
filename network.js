@@ -1,13 +1,15 @@
 // =========================== SOCKET CONNECTIOM =========================== //
 
 var behavior = require("./behavior");
-var io = require('socket.io')(behavior.http);
 var serverjs = require("./server");
 var server = new serverjs.Server();
+var io = require('socket.io')(serverjs.http);
+
 
 // ================================ ACTION ================================ //
 
-// when the user clicks the start/stop button.. 
+
+// when the user does something..
 io.on('connection', function(socket){
   // log when the connection is made
   console.log('initialization...');
@@ -25,10 +27,18 @@ io.on('connection', function(socket){
   socket.on('reset', function(){
     behavior.resetAction();
   });
-    // on reset button press
+
+  // on DHT button press
   socket.on('DHT', function(){
-    behavior.applyDHT = true;
+    behavior.applyDHT = !behavior.applyDHT;
+    if (behavior.applyDHT) {
+      socket.emit('applyDHT');
+    }
+    else {
+      socket.emit('noDHT')
+    }
   });
+
   // on browser exit
   socket.on('disconnect', function(){
     console.log('Disconnected');
@@ -37,10 +47,11 @@ io.on('connection', function(socket){
 });
 
 // when the server receives a request..
-behavior.http.on('request', function(req, res) {
+serverjs.http.on('request', function(req, res) {
   // print out the type of the request to the console
   console.log("request made! " + req.method);
   // increment the request count
   behavior.count += 1;
   behavior.currCount += 1;
 });
+        
