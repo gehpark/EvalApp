@@ -1,33 +1,18 @@
 // ================================ MODULES ================================ //
-
-// initialize app to be a function handler
-var express = require('express');
-exports.app = express();
-var httpo = require('http');
-// supply the function handler to an HTTP server
-exports.http = httpo.Server(exports.app);
-
 // require for exports.stream
 var fs = require('fs');
-// start a collection to measure server load
-var stats = require('measured').createCollection();
-
 // to set paths for the html and css files
 //var path = require('path')
 // import local files
 var clientjs = require("./client");
 var ringjs = require("./ring");
 
+// =========================== CLIENT VARIABLES =========================== //
 
 // this is the variable that will be set to true if we want to
 // apply the DHT algorithm to compare how effective the algorithm
 // is in decreasing server load
 exports.applyDHT = false;
-
-// ============================= CLIENT SET UP ============================= //
-
-// the .port that we want to use
-exports.port = 8111;
 
 // this is the total number of clients
 // ++ possible additions add and taking out clients during simulation
@@ -44,36 +29,11 @@ var keys = [];
 // keep track of the new nodes. only used for set up purposes
 var newNodes = [];
 
-
 // create instances of Client for each client
 for (var i = 0; i < numClients; i++) {
   // and add to the array
   clients.push(new clientjs.Client(i));
 }
-
-// // link the initial links of the ring structure together
-// for (var c in clients) {
-//   // set the succeeding element in the ring to be the
-//   // following one in the clients list
-//   clients[c].cw = clients[(c + 1) % clients.length];  
-//   // set the preceding element in the ring to be the
-//   // leading one in the clients list
-//   clients[c].ccw = clients[(c - 1) % clients.length]; 
-// }
-
-// ========================== CLIENT SIDE SET UP ========================== //
-
-// make the HTTP server listen on our port
-exports.http.listen(exports.port, function(){
-  console.log('Listening on *:' + exports.port);
-});
-
-exports.app.get('/', function(req, res){
-  res.sendfile('index.html');
-  stats.meter('requestsPerSecond').mark();
-});
-exports.app.use(express.static(__dirname, '/public'));
-
 
 // ========================= NETWORK WEBRTC SET UP ========================= //
 
@@ -88,24 +48,8 @@ cRing.setUp(keys, newNodes);
 cRing.buildSuccessorsPredecessorsListAll();
 cRing.buildFingerTableAll();
 
-//debugging purposes
-// var v = cRing.head;
-// do {
-  // for (var n = 0; n < v.fingerTable.length; n++) {
-  //   console.log(v.nodeID + " : " + v.fingerTable[n][1].nodeID);
-  // }
-  // console.log("does it connect? " + v.nodeID + "." + v.cw.nodeID);
-  // v = v.cw;
-// } while(v != cRing.head)
-
-// console.log("finger table:");
-// console.log(isBetween(1,5,10,15));
-// stabilize the ring every x seconds?
-// var function = setInterval(cRing.stabilize(), 10000); 
-
-
 // ============================= TIMER SET UP ============================= //
-
+exports.port = 8111;
 // set the duration for which we want the simulation to run
 var maxTime = 5000;
 
@@ -121,8 +65,7 @@ var isTimerDone = false;
 
 // these variables are for statPrint; an alternative to statFunc
 // issues with reporting the request count with using the 'measured' module
-// set count to start at -3 due to initialization requests that are made
-exports.count = -3;
+exports.count = 0;
 exports.currCount = 0;
 var mean = 0;
 var current = 0;
@@ -142,6 +85,7 @@ exports.stream.write("Length of Duration: " + maxTime + "\r\n");
 // probably the most inefficient way to get the data but
 // cant figure out what this collection thing is
 // for graphing purposes
+// (to be used with the measure module)
 function dataEntry (splitData) {
   if(splitData.length > 1) {
     this.mean = splitData[0].substr(29);
@@ -171,6 +115,8 @@ var timeData = [];
 
 // ============================ REQUEST ACTION ============================ //
 
+
+
 // this is for the gather and send method without webRTC
 // assign a key to some client
 var setGatherKey = function() {
@@ -196,6 +142,8 @@ var gather = function(c, randRequest, timeElapsed) {
   randRequest.representative.reqCounter++;
 }
 
+// wrapper funtion to start generating and sending requests depending on
+// whether we want to use the DHT or not
 exports.action = function () {
   if (exports.applyDHT) {
     exports.actionChord();
@@ -245,7 +193,7 @@ exports.actionGather = function() {
           method: clientjs.requests[i].reqType,
           body: ""
         }
-        clientjs.makeReq(options);
+        clientjs.makeReq(options); //, clientjs.requests[i], timeElapsed);
       }
     }
   }, timerInterval);
@@ -287,6 +235,7 @@ exports.statPrintWrapper = function() {
     oneMin = exports.count / 60000;
 
     // print to both the console and the output file
+    console.log("DHT applied = " + exports.applyDHT);
     console.log("Server Statistics: time : " + timeElapsedStat);
     exports.stream.write("Server Statistics: time : " + timeElapsedStat + "\n");
     console.log("   Total count: " + exports.count);
@@ -331,8 +280,26 @@ exports.actionChord = function() {
       console.log(randRequest.dat.reqType + " requested by: " + currNode.client.id + ", TIME: " + timeElapsed);
       // find the responsible node and using the requesting node itself and its finger table, 
       var respNode = cRing.findFingerTable(randRequest.ID, currNode, Math.pow(2,cRing.m));
-      // add the current node's id to the list of requests that the responsible node received
-      respNode.recipients.push(clientjs.logInfo(currNode.nodeID, timeElapsed, randRequest.id));
+      // identify which element in the key array of the responsible Node is our key
+      // var index = null;
+      // for (var c in respNode.key.length) {
+      //   if (respNode.key[c].ID == randRequest.ID) {
+      //     index = c;
+      //     break;
+      //   }
+      // }
+      // // check if the data that the node has is expired. if not, then we need not worry about it
+      // // and just send that back.
+      // if (index != null) {
+      //   if (respNode.key[index].expireTime == null) {
+      //     respNode.key[index].expireTime = timeElapsed + 5000;
+      //   }
+      //    else if (respNode.key[index].expireTime < timeElapsed) {
+        // add the current node's id to the list of requests that the responsible node received
+        respNode.recipients.push(clientjs.logInfo(currNode.nodeID, timeElapsed, randRequest.id)); 
+        //}
+      //}
+     
       // save to each client's personal request log
       currNode.client.reqs.push(randRequest.reqType);
       currNode = currNode.cw;
@@ -341,18 +308,29 @@ exports.actionChord = function() {
 
   // at each timer interval, send requests to the server
   exports.sendReqFuncChord = setInterval(function () {
+    // start at the head of the ring structure
     var currNode = cRing.head;
+    // and for all the nodes.. 
     do {
-      for(var i = 0; i < currNode.recipients.length; i++) {
-        console.log("THIS MAKES SENSE TO BE 1 " + currNode.recipients.length);
-        console.log("THIS MAKES SENSE TO BE 1 " + currNode.recipients.length);
+      // and all the keys each node is responsible for..
+      for(var i = 0; i < currNode.key.length; i++) {
+        // set up the options needed to make the request
         var options = {
           uri: "http://localhost:" + exports.port + "/",
           // default to GET
-          method: currNode.key[i],
+          method: currNode.key[i].dat.reqType,
           body: ""
         }
-        clientjs.makeReq(options);
+        // find the time at which we make the request.
+        // for this program's purposes, we can base it all off of the time when we make
+        // the request, instead of when the responsible node gets the response back
+        // since we dont actually care about the response
+        // we only want to measure server load
+        //var timeElapsed = (new Date().getTime() - start).toString();
+        // make the actual request
+        clientjs.makeReq(options); //, currNode.key[i].key.dat, timeElapsed);
+        // and update the expire time of the data object
+        //currNode.key[i].expireTime = timeElapsed;
       }
       // reset the recipients array for the next round
       currNode.recipients = [];
@@ -363,10 +341,12 @@ exports.actionChord = function() {
 
 // stop the communication
 exports.stopAction = function() {
+  // if we were applying DHT..
   if (exports.applyDHT) {
     clearInterval(exports.reqFuncChord);
     clearInterval(exports.sendReqFuncChord);
   }
+  // if we were not applying DHT..
   else {
     clearInterval(exports.reqFunc);
     clearInterval(exports.sendReqFunc);
