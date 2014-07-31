@@ -21,6 +21,7 @@ exports.Data = function(reqType) {
   this.reqType = reqType;
   // client that this request should be forwarded to
   this.representative = null;
+  this.expireTime = null;
 }
 
 // create a prototype for a log info to store
@@ -46,11 +47,15 @@ for (var r in requestNames) {
 }
 
 // makes the request
+//exports.makeReq = function (options, dataObj, currentTime) {
 exports.makeReq = function (options) {
 	var r = request(options, function(error, res, body) {
       if (error !== null) {
         console.log(error);
+        console.log("What the hell is happening")
       }
+      // console.log("the other headers");
+      // console.log(JSON.stringify(res.headers));
   });
 };
 
