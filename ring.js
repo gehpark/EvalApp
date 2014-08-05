@@ -13,6 +13,7 @@ function node(client, nodeID) {
   this.cw = null;
   this.ccw = null;
   // the key(s) that this node is responsible for sending. may be null
+  // list of cache items
   this.key = []; 
   // the array of the clients who have sent to this node a request
   this.recipients = [];
@@ -22,6 +23,10 @@ function node(client, nodeID) {
   // successors and predecessors in case the immediate relations fail.
   this.successorsList = [];
   this.predeccesorsList = [];
+  // gather information about the number of hops
+  this.hopCounter = 0;
+  this.hopAverage = 0;
+  this.reqCounter = 0;
 }
 
 exports.key = function(data) {
@@ -31,12 +36,17 @@ exports.key = function(data) {
   this.ID = null;
 }
 
+var cache = function(key, expireTime) {
+  this.key = key;
+  this.expireTime = expireTime;
+}
+
 var contains = function(list, obj) {
-    for (var i = 0; i < list.length; i++) {
-        if (list[i] === obj) {
-            return true;
-        }
+  for (var i = 0; i < list.length; i++) {
+    if (list[i] === obj) {
+        return true;
     }
+  }
     return false;
 }
 
@@ -80,6 +90,8 @@ exports.ring = function(m, clients) {
   this.tail = null;
   // this is the largest ID value that the nodes on this ring can have
   this.maxID = Math.pow(2,m) - 1;
+  // keep track of the keys
+  this.keys = [];
 
   // this function finds the first empty slot in which we can place a
   // new node and places it there, stabilizing by updating the
@@ -147,7 +159,7 @@ exports.ring = function(m, clients) {
   }
 
   // assign IDS to data(keys) and clients(nodes)
-  this.assignIDs = function(keysList, newNodesList) {
+  this.assignIDs = function(newNodesList) {
     // we want to keep track of the IDs that are taken
     var taken = [];
     // while we have not reached the last element
@@ -171,9 +183,9 @@ exports.ring = function(m, clients) {
     }
 
     // assign the keys ids of the same space
-    for (var i in keysList) {
+    for (var i in this.keys) {
       // use SHA-1 to generate a hashed key
-      var hex = sha1("K" + keysList[i].ID);
+      var hex = sha1("K" + this.keys[i].ID);
       // parse into an integer and mod by Math.pow(2,m) to get an ID in our range
       var hash = parseInt(hex, 16) % Math.pow(2,m);
       // add it to the list of taken IDs
@@ -183,20 +195,25 @@ exports.ring = function(m, clients) {
         hash = Math.floor(Math.random() * Math.pow(2,m));
       }
       // set the id       
-      keysList[i].ID = hash;
+      this.keys[i].ID = hash;
     }
   }
 
+    //
+    //
+    // Correction: the keys do not store which nodes are responsible for them..
+    //
+    // 
  // this function works with all the keys (types of requests in our case) 
  // that we have and assigns it to the first node (client) that it encounters
-  this.assignKeysToNodes = function(keysList, newNodesList) {
+  this.assignKeysToNodes = function() {
     // for each key in our array of keys
-    for (var k in keysList) {
+    for (var k in this.keys) {
       // set the representative field to the result that we get after calling
       // getCW of the id of the current key
-      var rep = this.getCW(keysList[k].ID);
-      keysList[k].dat.representative = rep;
-      rep.key.push(keysList[k]);
+      var rep = this.getCW(this.keys[k].ID);
+      //this.keys[k].dat.representative = rep;
+      rep.key.push(new cache(this.keys[k], 0));
     }
   }
 
@@ -213,8 +230,8 @@ exports.ring = function(m, clients) {
   // this is the function that sets up the initial structure for the
   // chord algorithm. this does not make use of join or put, because
   // this will be called before the finger tables are built. 
-  this.setUp = function(keysList, newNodesList) {
-    this.assignIDs(keysList, newNodesList);
+  this.setUp = function(newNodesList) {
+    this.assignIDs(newNodesList);
     if (newNodesList.length < 1) {
       // we should have at least one node!!
       return null;
@@ -233,12 +250,7 @@ exports.ring = function(m, clients) {
     this.tail = newNodesList[newNodesList.length - 1];
     // now that we have the nodes set up, assign the keys to their
     // representative nodes
-    //
-    //
-    // Correction: the keys do not store which nodes are responsible for them..
-    //
-    // 
-    // this.assignKeysToNodes(keysList, newNodesList);
+    this.assignKeysToNodes();
   }
 
   // this function returns the node that corresponds to the input node id
@@ -327,21 +339,25 @@ exports.ring = function(m, clients) {
   }
 
   // this function finds what element of the finger table should be referenced
-  this.findFingerTable = function(inputID, nd) {
+  this.findFingerTable = function(inputID, nd, hopNode) {
   for (var i = 0; i < m-1; i++) {
+    // everytime we hop, increment the counter
+    hopNode.hopCounter++;
     // check to see if the input id is within the range of the fingers of the
     // specified node's finger table
-      if (isBetween(nd.fingerTable[i][0], inputID, nd.fingerTable[i+1][0], Math.pow(2,m))) {
-        return nd.fingerTable[i][1];
-        
-      }
-      else {
-        // forward this problem to the successor and see if that one can 
-        // locate where the input node should go
-        this.findFingerTable(inputID, nd.cw);
-       return nd;
+      if (isBetween(nd.fingerTable[i][0], inputID, nd.fingerTable[i+1][0], this.maxID)) {
+        // recalculate the new average for this node and update
+        hopNode.hopAverage = (hopNode.hopCounter + hopNode.hopAverage * hopNode.reqCounter) / (hopNode.reqCounter + 1);
+        // reset to 0 for the next request
+        hopNode.hopCounter = 0;
+        // increment total number of requests
+        hopNode.reqCounter++;
+        return nd.fingerTable[i][1]; 
       }
     }
+    // forward this problem to the successor and see if that one can 
+    // locate where the input node should go
+    return this.findFingerTable(inputID, nd.fingerTable[m-1][1], hopNode);
   }
 
   // this function places a new node where it belongs
@@ -349,7 +365,7 @@ exports.ring = function(m, clients) {
   // that already is on the ring.
   this.put = function(newNode, nd) {
     // find the successor of the new node that we want to add
-    var place = findFingerTable(newNode.nodeID, nd);
+    var place = findFingerTable(newNode.nodeID, nd, nd);
     // update the successors and predecessors of the new node
     newNode.cw = place;
     newNode.ccw = place.ccw;
@@ -363,21 +379,53 @@ exports.ring = function(m, clients) {
   this.leave = function (nodeID) {
     // get the node object from the ring
     var node = this.getNode(nodeID);
+    var nodeToEdit = node.cw;
     node.cw.ccw = node.ccw;
     node.ccw.cw = node.cw;
-  }
-
-  // update the predecessors and successorts for the ring structure
-  // when a node joins
-  this.join = function (object,nd) {
-    if (object.type == client) {
-      // add the input client instance to the array of all our clients
-      clients.push(client);
+    this.buildFingerTableAll;
+    this.buildSuccessorsPredecessorsListAll;
+    // add the keys that this node was responsible for
+    // onto its successor 
+    for (var c = 0; c < node.key.length; c++) {
+      nodeToEdit.key.append(node.key[c]);
     }
-    // create a node element and add to the ring structure
-    this.put(new node(object), nd);
   }
 
+  // update the predecessors and successors for the ring structure
+  // when a node joins
+  this.join = function (client, nd) {
+    // determine what the id will be
+    var hex = sha1("C" + client.id);
+    var hash = parseInt(hex, 16) % Math.pow(2,m); 
+    while(contains(taken,hash)) {
+      hash = Math.floor(Math.random() * Math.pow(2,m));
+    }
+    // add it to the list of taken IDs
+    taken.push(hash);
+    // create a node element and add to the ring structure
+    var newNode = new node(client,hash);
+    this.put(newNode, nd);
+    this.buildFingerTableAll;
+    this.buildSuccessorsPredecessorsListAll;
+    // find out which node will be affected
+    var nodeToEdit = this.getCW(hash);
+    // save the list of keys that this node is responsible for
+    var availableKeys = nodeToEdit.key;
+    // clear out the keys it is responsible for
+    nodeToEdit.key = [];
+    // determine which node is now responsible for it and add it to 
+    // the approprifate key list
+    for (var c = 0; c < availableKeys.length; c++) {
+      if (availableKeys[c].ID < hash) {
+        newNode.key.push(availableKeys[c]);
+      }
+      else {
+        nodeToEdit.key.push(availableKeys[c]);
+      }
+    }    
+  }
+
+    // edit finger tables, successor/predecessor lists, key list
   // this function stabilizes the whole ring in case some nodes failed
   this.stabilize = function() {
     // keep track of which node we are observing
@@ -408,7 +456,13 @@ exports.ring = function(m, clients) {
           }
         }
       }
+      // clear the list of keys this node is responsible for
+      // we will repopulate this array later
+      current.key = [];
     }
+    this.buildFingerTableAll;
+    this.buildSuccessorsPredecessorsListAll;
   }
-
+  // reassign the keys to the nodes
+  this.assignKeysToNodes();
 }
