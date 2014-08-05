@@ -23,9 +23,6 @@ var numClients = 10;
 // the strcutre of the ring that we will use for the DHT chord algorithm
 var clients = [];
 
-// keep a list of the keys that we have
-var keys = [];
-
 // keep track of the new nodes. only used for set up purposes
 var newNodes = [];
 
@@ -36,17 +33,17 @@ for (var i = 0; i < numClients; i++) {
 }
 
 // ========================= NETWORK WEBRTC SET UP ========================= //
-
+// create and set up the ring
+var cRing = new ringjs.ring(4, clients);
 // create a new key for each data object
 // and add it to the array of keys
 for (var i in clientjs.requests) {
-  keys.push(new ringjs.key(clientjs.requests[i]));
+  cRing.keys.push(new ringjs.key(clientjs.requests[i]));
 }
-// create and set up the ring
-var cRing = new ringjs.ring(4, clients);
-cRing.setUp(keys, newNodes);
-cRing.buildSuccessorsPredecessorsListAll();
+cRing.setUp(newNodes);
 cRing.buildFingerTableAll();
+cRing.buildSuccessorsPredecessorsListAll();
+
 
 // ============================= TIMER SET UP ============================= //
 exports.port = 8111;
@@ -275,30 +272,39 @@ exports.actionChord = function() {
     do {
       timeElapsed = (new Date().getTime() - start).toString();
       // choose what type of request to (randomly) "make". we pick a random key
-      var randRequest = keys[Math.floor(Math.random() * keys.length)];
+      var randRequest = cRing.keys[Math.floor(Math.random() * cRing.keys.length)];
       // print to the console
       console.log(randRequest.dat.reqType + " requested by: " + currNode.client.id + ", TIME: " + timeElapsed);
       // find the responsible node and using the requesting node itself and its finger table, 
-      var respNode = cRing.findFingerTable(randRequest.ID, currNode, Math.pow(2,cRing.m));
+      // ***************** uh oh, this old version had a maxID. but i dont remember/see the changes made for a max id.
+      //var respNode = cRing.findFingerTable(randRequest.ID, currNode, Math.pow(2,cRing.m));
+      var respNode = cRing.findFingerTable(randRequest.ID, currNode, currNode);
+      console.log("Average Hop Count for Node # " + currNode.nodeID + " : " + currNode.hopAverage);
+      exports.stream.write("Average Hop Count for Node # " + currNode.nodeID + " : " + currNode.hopAverage + "\r\n");
       // identify which element in the key array of the responsible Node is our key
-      // var index = null;
-      // for (var c in respNode.key.length) {
-      //   if (respNode.key[c].ID == randRequest.ID) {
-      //     index = c;
-      //     break;
-      //   }
-      // }
-      // // check if the data that the node has is expired. if not, then we need not worry about it
-      // // and just send that back.
-      // if (index != null) {
-      //   if (respNode.key[index].expireTime == null) {
-      //     respNode.key[index].expireTime = timeElapsed + 5000;
-      //   }
-      //    else if (respNode.key[index].expireTime < timeElapsed) {
-        // add the current node's id to the list of requests that the responsible node received
-        respNode.recipients.push(clientjs.logInfo(currNode.nodeID, timeElapsed, randRequest.id)); 
-        //}
-      //}
+      // set it equal to a random character, since we know it should be a number
+      var index = "a";
+      for (var c = 0; c < respNode.key.length; c++) {
+        if (respNode.key[c].key.ID == randRequest.ID) {
+          index = c;
+          break;
+        }
+      }
+
+      // check if the data that the node has is expired. if not, then we need not worry about it
+      // and just send that back.
+      // only do this if we have found the index. (we should have)
+      if (index != "a") {
+        // if the expireTime is zero (Default at declaraction of the caches)
+        // then set it to 5000 after the current time
+        if (respNode.key[index].expireTime == 0) {
+          respNode.key[index].expireTime = timeElapsed + 5000;
+        }
+         else if (respNode.key[index].expireTime < timeElapsed) {
+          // add the current node's id to the list of requests that the responsible node received
+          respNode.recipients.push(clientjs.logInfo(currNode, timeElapsed, randRequest.id)); 
+        }
+      }
      
       // save to each client's personal request log
       currNode.client.reqs.push(randRequest.reqType);
@@ -309,7 +315,7 @@ exports.actionChord = function() {
   // at each timer interval, send requests to the server
   exports.sendReqFuncChord = setInterval(function () {
     // start at the head of the ring structure
-    var currNode = cRing.head;
+    var currNode = cRing.head; 
     // and for all the nodes.. 
     do {
       // and all the keys each node is responsible for..
@@ -318,7 +324,7 @@ exports.actionChord = function() {
         var options = {
           uri: "http://localhost:" + exports.port + "/",
           // default to GET
-          method: currNode.key[i].dat.reqType,
+          method: currNode.key[i].key.dat.reqType,
           body: ""
         }
         // find the time at which we make the request.
@@ -326,11 +332,11 @@ exports.actionChord = function() {
         // the request, instead of when the responsible node gets the response back
         // since we dont actually care about the response
         // we only want to measure server load
-        //var timeElapsed = (new Date().getTime() - start).toString();
+        var timeElapsed = (new Date().getTime() - start).toString();
         // make the actual request
         clientjs.makeReq(options); //, currNode.key[i].key.dat, timeElapsed);
         // and update the expire time of the data object
-        //currNode.key[i].expireTime = timeElapsed;
+        currNode.key[i].expireTime = timeElapsed + 5000;
       }
       // reset the recipients array for the next round
       currNode.recipients = [];
