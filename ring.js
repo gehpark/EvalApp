@@ -351,31 +351,34 @@ exports.ring = function(m, clients) {
     * @param [in] hopNode   an original node which wants to find a key or a node with inputID
     **/
     this.findFingerTable = function(inputID, nd, hopNode) {
-        
-        //Output a value of finger table
-        if( isBetween( nd.nodeID, inputID, nd.fingerTable[0][1].nodeID, this.maxID ) )
-        {
-            return nd.fingerTable[1][1]; 
+
+      // Check to see if the input id is between the known node and the known node's successor
+      if( isBetween( nd.nodeID, inputID, nd.fingerTable[0][1].nodeID, this.maxID ) )
+      {
+        // if so, return the known node's successor
+          return nd.fingerTable[0][1]; 
+      }
+      
+      // check to see if the input id is within finger table reach of the known node
+      for (var i = 0; i < m-1; i++) {
+        // everytime we hop, increment the counter
+        hopNode.hopCounter++;
+        // check to see if the input id is within the range of the fingers of the
+        // specified node's finger table on the ith row
+        if (isBetween(nd.fingerTable[i][1].nodeID, inputID, nd.fingerTable[i+1][1].nodeID, this.maxID)) {
+            // recalculate the new average for this node and update
+            hopNode.hopAverage = (hopNode.hopCounter + hopNode.hopAverage * hopNode.reqCounter) / (hopNode.reqCounter + 1);
+            // reset to 0 for the next request
+            hopNode.hopCounter = 0;
+            // increment total number of requests
+            hopNode.reqCounter++;
+            // if so, return the successor
+            return nd.fingerTable[i+1][1];
         }
-        
-        for (var i = 0; i < m-1; i++) {
-            // everytime we hop, increment the counter
-            hopNode.hopCounter++;
-            // check to see if the input id is within the range of the fingers of the
-            // specified node's finger table
-            if (isBetween(nd.fingerTable[i][1].nodeID, inputID, nd.fingerTable[i+1][1].nodeID, this.maxID)) {
-                // recalculate the new average for this node and update
-                hopNode.hopAverage = (hopNode.hopCounter + hopNode.hopAverage * hopNode.reqCounter) / (hopNode.reqCounter + 1);
-                // reset to 0 for the next request
-                hopNode.hopCounter = 0;
-                // increment total number of requests
-                hopNode.reqCounter++;
-                return this.findFingerTable(inputID, nd.fingerTable[i][1], hopNode);
-            }
-        }
-    // forward this problem to the successor and see if that one can 
-    // locate where the input node should go
-    return this.findFingerTable(inputID, nd.fingerTable[m-1][1], hopNode);
+      }
+      // forward this problem to the successor and see if that one can 
+      // locate where the input node should go
+      return this.findFingerTable(inputID, nd.fingerTable[m-1][1], hopNode);
   }
 
   // this function places a new node where it belongs
