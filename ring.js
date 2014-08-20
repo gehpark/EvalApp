@@ -69,7 +69,8 @@ var isBetween = function(a, b, c, maxID) {
   // so we can add the maxID to compare. this should only happen
   // at maximum once per finger table
   else {
-    if (a <= b && b <= c+maxID) {
+    if ( (a <= b && b <= maxID) || 
+         ( 0 <= b && b<=c ) ) {
       return true;
     }
     else {
@@ -83,16 +84,19 @@ var isBetween = function(a, b, c, maxID) {
 // use for the chord algorithm. the input is an integer m which determines
 // the max size of the ring. we can have at maximum Math.pow(2,m) nodes
 exports.ring = function(m, clients) {
-  this.m = m;
-  // marks the head of the ring
-  this.head = null;
-  // and the tail
-  this.tail = null;
-  // this is the largest ID value that the nodes on this ring can have
-  this.maxID = Math.pow(2,m) - 1;
-  // keep track of the keys
-  this.keys = [];
-
+    this.m = m;
+    // marks the head of the ring
+    this.head = null;
+    // and the tail
+    this.tail = null;
+    // this is the largest ID value that the nodes on this ring can have
+    this.maxID = Math.pow(2,m) - 1;
+    // keep track of the keys
+    this.keys = [];
+    this.taken = [];
+  // declare a variable to keep track of stabilization and its progress
+  this.stabilizeIndex = 0;
+  
   // this function finds the first empty slot in which we can place a
   // new node and places it there, stabilizing by updating the
   // successors and predecessors.
@@ -160,8 +164,6 @@ exports.ring = function(m, clients) {
 
   // assign IDS to data(keys) and clients(nodes)
   this.assignIDs = function(newNodesList) {
-    // we want to keep track of the IDs that are taken
-    var taken = [];
     // while we have not reached the last element
     for (var c in clients) {
       // use SHA-1 to generate a hashed key
@@ -173,15 +175,15 @@ exports.ring = function(m, clients) {
       // that are being generated are huge numbers, and we only want to
       // mod it by Math.pow(2,m) which may be a very small number) then we opt to
       // the math.random function
-      while(contains(taken,hash)) {
+      while(contains(this.taken,hash)) {
         hash = Math.floor(Math.random() * Math.pow(2,m));
       }
       // and set the nodeID
       newNodesList.push(new node(clients[c], hash));
       // add it to the list of taken IDs
-      taken.push(hash);
+      this.taken.push(hash);
     }
-
+      
     // assign the keys ids of the same space
     for (var i in this.keys) {
       // use SHA-1 to generate a hashed key
@@ -189,14 +191,15 @@ exports.ring = function(m, clients) {
       // parse into an integer and mod by Math.pow(2,m) to get an ID in our range
       var hash = parseInt(hex, 16) % Math.pow(2,m);
       // add it to the list of taken IDs
-      taken.push(hash);
+      this.taken.push(hash);
       // try again if its taken
-      while(contains(taken, hash)) {
+      while(contains(this.taken, hash)) {
         hash = Math.floor(Math.random() * Math.pow(2,m));
       }
       // set the id       
       this.keys[i].ID = hash;
     }
+      
   }
 
     //
@@ -231,11 +234,12 @@ exports.ring = function(m, clients) {
   // chord algorithm. this does not make use of join or put, because
   // this will be called before the finger tables are built. 
   this.setUp = function(newNodesList) {
-    this.assignIDs(newNodesList);
-    if (newNodesList.length < 1) {
-      // we should have at least one node!!
-      return null;
-    }
+      this.assignIDs(newNodesList);
+      if (newNodesList.length < 1) {
+        // we should have at least one node!!
+        return null;
+      }
+         
     // organize the clients by their id
     newNodesList.sort(compareID);
     // set the first element in the array to be the head of the ring
@@ -251,6 +255,7 @@ exports.ring = function(m, clients) {
     // now that we have the nodes set up, assign the keys to their
     // representative nodes
     this.assignKeysToNodes();
+    
   }
 
   // this function returns the node that corresponds to the input node id
@@ -263,7 +268,7 @@ exports.ring = function(m, clients) {
     //   current = current.cw;
     // }
     // and traverse until we get to the tail
-    while (current != this.tail) {
+    do {
       //console.log("stcu");
       // check that the node id is correct
       if (current.nodeID == nodeID) {
@@ -274,7 +279,7 @@ exports.ring = function(m, clients) {
         //console.log("def not " + current.nodeId);
         current = current.cw;
       }
-    }
+    }while( current != this.head );
     return "null";
   }
 
@@ -322,10 +327,10 @@ exports.ring = function(m, clients) {
   this.buildFingerTable = function(nd) {
       // and each finger table should have m entries
       for (var i = 0; i < m; i++) {
-        // the finger table id may be greater than the maxID; so use mod
-        var ndID = (nd.nodeID + Math.pow(2,i)) % Math.pow(2,m);
-        // add the tuple of the id and the following node to the fingertable
-        nd.fingerTable.push([ndID, this.getCW(ndID)]);
+          // the finger table id may be greater than the maxID; so use mod
+          var ndID = (nd.nodeID + Math.pow(2,i)) % Math.pow(2,m);
+          // add the tuple of the id and the following node to the fingertable
+          nd.fingerTable.push([ndID, this.getCW(ndID)]);
       }
   }
   this.buildFingerTableAll = function() {
@@ -338,23 +343,36 @@ exports.ring = function(m, clients) {
     } while (current != this.head)
   }
 
-  // this function finds what element of the finger table should be referenced
-  this.findFingerTable = function(inputID, nd, hopNode) {
-  for (var i = 0; i < m-1; i++) {
-    // everytime we hop, increment the counter
-    hopNode.hopCounter++;
-    // check to see if the input id is within the range of the fingers of the
-    // specified node's finger table
-      if (isBetween(nd.fingerTable[i][0], inputID, nd.fingerTable[i+1][0], this.maxID)) {
-        // recalculate the new average for this node and update
-        hopNode.hopAverage = (hopNode.hopCounter + hopNode.hopAverage * hopNode.reqCounter) / (hopNode.reqCounter + 1);
-        // reset to 0 for the next request
-        hopNode.hopCounter = 0;
-        // increment total number of requests
-        hopNode.reqCounter++;
-        return nd.fingerTable[i][1]; 
-      }
-    }
+    /*
+    * @note this function finds what element of the finger table should be referenced
+    * 
+    * @param [in] inputID   ID for searching a key or a node
+    * @param [in] nd        a node of current search
+    * @param [in] hopNode   an original node which wants to find a key or a node with inputID
+    **/
+    this.findFingerTable = function(inputID, nd, hopNode) {
+        
+        //Output a value of finger table
+        if( isBetween( nd.nodeID, inputID, nd.fingerTable[0][1].nodeID, this.maxID ) )
+        {
+            return nd.fingerTable[1][1]; 
+        }
+        
+        for (var i = 0; i < m-1; i++) {
+            // everytime we hop, increment the counter
+            hopNode.hopCounter++;
+            // check to see if the input id is within the range of the fingers of the
+            // specified node's finger table
+            if (isBetween(nd.fingerTable[i][1].nodeID, inputID, nd.fingerTable[i+1][1].nodeID, this.maxID)) {
+                // recalculate the new average for this node and update
+                hopNode.hopAverage = (hopNode.hopCounter + hopNode.hopAverage * hopNode.reqCounter) / (hopNode.reqCounter + 1);
+                // reset to 0 for the next request
+                hopNode.hopCounter = 0;
+                // increment total number of requests
+                hopNode.reqCounter++;
+                return this.findFingerTable(inputID, nd.fingerTable[i][1], hopNode);
+            }
+        }
     // forward this problem to the successor and see if that one can 
     // locate where the input node should go
     return this.findFingerTable(inputID, nd.fingerTable[m-1][1], hopNode);
@@ -365,29 +383,72 @@ exports.ring = function(m, clients) {
   // that already is on the ring.
   this.put = function(newNode, nd) {
     // find the successor of the new node that we want to add
-    var place = findFingerTable(newNode.nodeID, nd, nd);
+    var place = this.findFingerTable(newNode.nodeID, nd, nd);
     // update the successors and predecessors of the new node
     newNode.cw = place;
     newNode.ccw = place.ccw;
     // and same for the successors and predecessors themselves
     place.ccw = newNode;
-    newNode.cw = newNode;
+    place.ccw.cw = newNode;
   }
+
+// this function updates one row or layer of the pred., succ., and finger tables. 
+  this.steadyUpdateTables = function() {
+    // start at the head of the circle
+    var current = this.head;
+
+    // these are just setting up for the pred/succ table updates
+    var pred = current;
+    var succ = current;
+    for (var i = 0; i < this.stabilizeIndex; i++) {
+      pred = pred.ccw;
+      succ = succ.cw;
+    }
+    pred = pred.ccw;
+    succ = succ.ccw;
+
+    // traverse through the nodes
+    while(current != this.tail) {
+      // update the finger table one row at a time. we keep track of which row
+      // we are updating with the stabilizeIndex variable
+      // the finger table id may be greater than the maxID; so use mod
+      var ndID = (current.nodeID + Math.pow(2,this.stabilizeIndex)) % Math.pow(2,m);
+      // add the tuple of the id and the following node to the fingertable
+      current.fingerTable[this.stabilizeIndex] = [ndID, this.getCW(ndID)];
+
+      // add successor and increment
+      pred = pred.cw
+      current.successorsList[this.stabilizeIndex] = pred;
+      ;
+      // and predecessor and increment
+      succ = succ.cw;
+      current.predeccesorsList[this.stabilizeIndex] = succ;
+      
+      // increment the stabilize index
+      this.stabilizeIndex = (this.stabilizeIndex + 1) % this.m;
+
+      // move onto the next node
+      current = current.cw;
+    }
+  }
+
 
   // update the predecessors and successors for the ring structure
   // when a node leaves
   this.leave = function (nodeID) {
     // get the node object from the ring
     var node = this.getNode(nodeID);
+    // find out which node we have to modify 
     var nodeToEdit = node.cw;
+    // update the doubly linked lists
     node.cw.ccw = node.ccw;
     node.ccw.cw = node.cw;
-    this.buildFingerTableAll;
-    this.buildSuccessorsPredecessorsListAll;
-    // add the keys that this node was responsible for
-    // onto its successor 
+
+    this.steadyUpdateTables();
+
+    // add the keys that this node was responsible for onto its successor  
     for (var c = 0; c < node.key.length; c++) {
-      nodeToEdit.key.append(node.key[c]);
+      nodeToEdit.key.push(node.key[c]);
     }
   }
 
@@ -397,16 +458,17 @@ exports.ring = function(m, clients) {
     // determine what the id will be
     var hex = sha1("C" + client.id);
     var hash = parseInt(hex, 16) % Math.pow(2,m); 
-    while(contains(taken,hash)) {
+    while(contains(this.taken,hash)) {
       hash = Math.floor(Math.random() * Math.pow(2,m));
     }
     // add it to the list of taken IDs
-    taken.push(hash);
+    this.taken.push(hash);
     // create a node element and add to the ring structure
     var newNode = new node(client,hash);
     this.put(newNode, nd);
-    this.buildFingerTableAll;
-    this.buildSuccessorsPredecessorsListAll;
+    
+    this.steadyUpdateTables();
+
     // find out which node will be affected
     var nodeToEdit = this.getCW(hash);
     // save the list of keys that this node is responsible for
@@ -425,11 +487,22 @@ exports.ring = function(m, clients) {
     }    
   }
 
-    // edit finger tables, successor/predecessor lists, key list
+  // edit finger tables, successor/predecessor lists, key list
   // this function stabilizes the whole ring in case some nodes failed
   this.stabilize = function() {
     // keep track of which node we are observing
     var current = this.head;
+
+    // these are just setting up for the pred/succ table updates
+    var pred = current;
+    var succ = current;
+    for (var i = 0; i < this.stabilizeIndex; i++) {
+      pred = pred.ccw;
+      succ = succ.cw;
+    }
+    pred = pred.ccw;
+    succ = succ.ccw;
+    
     // go through the whole ring until we get to the tail
     while(current != this.tail) {
       // if the successor failed
@@ -456,13 +529,54 @@ exports.ring = function(m, clients) {
           }
         }
       }
+
+      // update the finger table one row at a time. we keep track of which row
+      // we are updating with the stabilizeIndex variable
+      // the finger table id may be greater than the maxID; so use mod
+      var ndID = (current.nodeID + Math.pow(2,this.stabilizeIndex)) % Math.pow(2,m);
+      // add the tuple of the id and the following node to the fingertable
+      current.fingerTable[this.stabilizeIndex] = [ndID, this.getCW(ndID)];
+
+      // add successor and increment
+      pred = pred.cw
+      current.successorsList[this.stabilizeIndex] = pred;
+      ;
+      // and predecessor and increment
+      succ = succ.cw;
+      current.predeccesorsList[this.stabilizeIndex] = succ;
+      
+      // increment the stabilize index
+      this.stabilizeIndex = (this.stabilizeIndex + 1) % this.m;
       // clear the list of keys this node is responsible for
       // we will repopulate this array later
-      current.key = [];
+      current.key = [];  
+      // move onto the next node
+      current = current.cw;
     }
-    this.buildFingerTableAll;
-    this.buildSuccessorsPredecessorsListAll;
   }
   // reassign the keys to the nodes
   this.assignKeysToNodes();
+      
+      /*
+      * @note Output Ring Information
+      * 
+      */
+    this.ConsoleOutRingData = function() {
+        var  l_Current = this.head;
+        
+        //loop from head to tail
+        while(l_Current != this.tail) {
+            
+            //print out node information
+            console.log( "Current Node: " + l_Current.nodeID );
+            
+            //print out a key ID
+            for(var i=0; i<l_Current.key.length; i++)
+            {
+                console.log( "key ID: " + l_Current.key[i].key.ID ); 
+            }
+            //update a variable
+            l_Current = l_Current.cw;
+        }
+    }
 }
